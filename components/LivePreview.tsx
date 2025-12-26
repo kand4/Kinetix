@@ -4,9 +4,9 @@
 */
 import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownTrayIcon, PlusIcon, ViewColumnsIcon, DocumentIcon, CodeBracketIcon, XMarkIcon, ChatBubbleLeftRightIcon, PaperAirplaneIcon, ViewfinderCircleIcon, ChevronDownIcon, SparklesIcon, PlayIcon, PauseIcon, WrenchScrewdriverIcon, CommandLineIcon, BoltIcon } from '@heroicons/react/24/outline';
+import { ArrowDownTrayIcon, PlusIcon, ViewColumnsIcon, DocumentIcon, CodeBracketIcon, XMarkIcon, ChatBubbleLeftRightIcon, PaperAirplaneIcon, ViewfinderCircleIcon, ChevronDownIcon, SparklesIcon, PlayIcon, PauseIcon, WrenchScrewdriverIcon, CommandLineIcon, BoltIcon, EyeIcon, BeakerIcon, ExclamationTriangleIcon, CheckCircleIcon, LinkIcon, CameraIcon, GlobeAltIcon, PhotoIcon, CpuChipIcon, CogIcon, CubeIcon } from '@heroicons/react/24/outline';
 import { Creation } from './CreationHistory';
-import { refineSimulation } from '../services/gemini'; // Import the new service
+import { refineSimulation, locateObject, generateSchematicOverlay, analyzeBiologicalEntity, BioData, analyzeTechnicalComponent, TechData } from '../services/gemini'; // Import new services
 
 interface LivePreviewProps {
   creation: Creation | null;
@@ -37,28 +37,53 @@ const LoadingStep = ({ text, active, completed }: { text: string, active: boolea
     </div>
   );
 
-// Smart Button with PRECISION CROSSHAIR
+// Smart Button with PRECISION CROSSHAIR & AUTO-PILOT
 const SmartFloatingButton = ({ 
     onDragStart, 
     onDragEnd,
     onMove,
-    isScanning
+    isScanning,
+    moveTo // New prop for Auto-Pilot
 }: { 
     onDragStart: () => void, 
     onDragEnd: (x: number, y: number) => void,
     onMove: (x: number, y: number) => void,
-    isScanning: boolean
+    isScanning: boolean,
+    moveTo?: { x: number, y: number } | null
 }) => {
     const [position, setPosition] = useState({ x: window.innerWidth - 100, y: 150 });
     const [isDragging, setIsDragging] = useState(false);
+    const [isAutoPiloting, setIsAutoPiloting] = useState(false);
     
     // Offset now tracks the mouse relative to the PROBE BODY Top-Left
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+    // Handle Auto-Pilot Movement
+    useEffect(() => {
+        if (moveTo) {
+            setIsAutoPiloting(true);
+            setPosition({ x: moveTo.x, y: moveTo.y });
+            
+            // Calculate tip position for the move callback
+            // Geometry: Body (56px) -> Center is 28px. Stem+Box = 80px vertical offset for tip.
+            const tipX = moveTo.x + 28;
+            const tipY = moveTo.y + 80;
+            
+            // Wait for transition to finish before triggering "End" (scan)
+            const timer = setTimeout(() => {
+                setIsAutoPiloting(false);
+                onMove(tipX, tipY); // Update Loupe
+                onDragEnd(tipX, tipY); // Trigger Scan
+            }, 1000); // 1s animation duration
+            return () => clearTimeout(timer);
+        }
+    }, [moveTo]);
 
     const handleMouseDown = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(true);
+        setIsAutoPiloting(false); // Manual override cancels auto-pilot
         onDragStart();
         // Calculate offset so the mouse stays exactly where it grabbed relative to the button
         setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
@@ -67,9 +92,18 @@ const SmartFloatingButton = ({
     const handleTouchStart = (e: React.TouchEvent) => {
         e.stopPropagation();
         setIsDragging(true);
+        setIsAutoPiloting(false);
         onDragStart();
         const touch = e.touches[0];
         setDragOffset({ x: touch.clientX - position.x, y: touch.clientY - position.y });
+    };
+
+    // Helper to calculate tip position based on current top-left
+    const getTipPosition = (currentX: number, currentY: number) => {
+        return {
+            x: currentX + 28,
+            y: currentY + 80
+        };
     };
 
     useEffect(() => {
@@ -78,7 +112,9 @@ const SmartFloatingButton = ({
                 const newX = e.clientX - dragOffset.x;
                 const newY = e.clientY - dragOffset.y;
                 setPosition({ x: newX, y: newY });
-                onMove(e.clientX, e.clientY);
+                
+                const tip = getTipPosition(newX, newY);
+                onMove(tip.x, tip.y);
             }
         };
 
@@ -88,7 +124,9 @@ const SmartFloatingButton = ({
                 const newX = touch.clientX - dragOffset.x;
                 const newY = touch.clientY - dragOffset.y;
                 setPosition({ x: newX, y: newY });
-                onMove(touch.clientX, touch.clientY);
+                
+                const tip = getTipPosition(newX, newY);
+                onMove(tip.x, tip.y);
             }
         };
 
@@ -96,17 +134,8 @@ const SmartFloatingButton = ({
             if (isDragging) {
                 setIsDragging(false);
                 
-                // --- GEOMETRY CALIBRATION ---
-                // Probe Body Width: 56px (w-14). Center X = 28px.
-                // Probe Body Height: 56px (w-14).
-                // Stem Height: 16px (h-4).
-                // Target Box: 16px (h-4). Center is at 8px.
-                // Total Y Offset = 56 (Body) + 16 (Stem) + 8 (Half Box) = 80px.
-                
-                const tipX = position.x + 28; 
-                const tipY = position.y + 80; 
-                
-                onDragEnd(tipX, tipY);
+                const tip = getTipPosition(position.x, position.y);
+                onDragEnd(tip.x, tip.y);
             }
         };
 
@@ -131,20 +160,18 @@ const SmartFloatingButton = ({
             style={{ 
                 left: `${position.x}px`, 
                 top: `${position.y}px`,
-                transform: isDragging ? 'scale(1.0)' : 'scale(1)',
-                transition: isDragging ? 'none' : 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                // Use CSS transition for Auto-Pilot smoothness, disable it for dragging
+                transition: isDragging ? 'none' : 'left 1s cubic-bezier(0.2, 0.8, 0.2, 1), top 1s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.2s',
+                transform: isDragging ? 'scale(1.0)' : 'scale(1)'
             }}
             onMouseDown={handleMouseDown}
             onTouchStart={handleTouchStart}
         >
-            {/* 
-               CRITICAL FIX: Enforce fixed width (w-14 = 56px) on the container.
-               This ensures 'items-center' calculates the exact center pixel (28px).
-            */}
+            {/* Probe Body */}
             <div className="relative w-14 flex flex-col items-center">
                 
-                {/* Visual Rings - Use Absolute Centering to prevent layout shifts */}
-                <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-14 h-14 bg-blue-500/20 rounded-full pointer-events-none ${isDragging || isScanning ? 'animate-ping' : ''}`}></div>
+                {/* Visual Rings */}
+                <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-14 h-14 bg-blue-500/20 rounded-full pointer-events-none ${isDragging || isScanning || isAutoPiloting ? 'animate-ping' : ''}`}></div>
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 -inset-1 bg-blue-400/10 rounded-full blur-sm w-16 h-16 pointer-events-none"></div>
                 
                 {/* Main Probe Body */}
@@ -160,22 +187,12 @@ const SmartFloatingButton = ({
                 </div>
 
                 {/* THE PRECISION CROSSHAIR TIP */}
-                {/* Visual alignment matches the math: Body(56) -> Stem(16) -> Box(16, center 8) */}
-                <div className={`flex flex-col items-center transition-all duration-200 z-10 ${isDragging ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-                    
-                    {/* Connection Stem (Height 16px / h-4) */}
+                <div className={`flex flex-col items-center transition-all duration-200 z-10 ${isDragging || isAutoPiloting ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
                     <div className="w-0.5 h-4 bg-blue-500 shadow-[0_0_8px_#3b82f6]"></div>
-                    
-                    {/* Crosshair Target (Height 16px / h-4) */}
                     <div className="relative w-4 h-4 flex items-center justify-center">
-                        {/* Box Frame */}
                         <div className="absolute inset-0 border border-blue-500/80 rounded-sm bg-blue-500/10"></div>
-                        
-                        {/* Crosshairs */}
                         <div className="w-px h-full bg-blue-500/60"></div>
                         <div className="h-px w-full bg-blue-500/60 absolute"></div>
-                        
-                        {/* Laser Point - RED for visibility and accuracy */}
                         <div className="absolute w-1.5 h-1.5 bg-red-500 rounded-full shadow-[0_0_8px_#ef4444] z-20"></div>
                     </div>
                 </div>
@@ -188,13 +205,179 @@ const SmartFloatingButton = ({
                     absolute left-16 top-4 
                     bg-black/90 text-white text-xs font-mono px-3 py-1.5 rounded-lg border border-zinc-800 
                     shadow-xl whitespace-nowrap pointer-events-none transition-all duration-300 z-20
-                    ${isDragging || isScanning ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-[-10px] group-hover:opacity-100 group-hover:translate-x-0'}
+                    ${isScanning ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-[-10px] group-hover:opacity-100 group-hover:translate-x-0'}
                 `}>
-                    {isScanning ? 'ANALYZING SIGNAL...' : isDragging ? 'ALIGN RED DOT' : 'Smart Probe Ready'}
+                    {isScanning ? 'ANALYZING...' : isAutoPiloting ? 'NAVIGATING...' : isDragging ? 'ALIGN RED DOT' : 'Ready'}
                 </div>
             </div>
         </div>,
         document.body
+    );
+};
+
+// --- NEW COMPONENT: BIO DATA CARD ---
+const BioDataCard = ({ data, onClose }: { data: BioData, onClose: () => void }) => {
+    return (
+        <div className="absolute top-20 right-4 md:right-8 z-50 w-80 md:w-96 animate-in slide-in-from-right-10 duration-500">
+            <div className={`glass-panel rounded-xl overflow-hidden border ${data.isDangerous ? 'border-red-500/50 shadow-[0_0_30px_rgba(239,68,68,0.2)]' : 'border-green-500/50 shadow-[0_0_30px_rgba(34,197,94,0.2)]'}`}>
+                
+                {/* Header with Classification */}
+                <div className={`p-4 border-b ${data.isDangerous ? 'bg-red-900/20 border-red-500/30' : 'bg-green-900/20 border-green-500/30'} flex items-start justify-between`}>
+                    <div>
+                        <h3 className="text-lg font-bold text-white leading-tight">{data.commonName}</h3>
+                        <p className="text-xs font-mono italic opacity-80">{data.scientificName}</p>
+                        <span className="inline-block mt-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/40 border border-white/10">
+                            {data.family}
+                        </span>
+                    </div>
+                    <button onClick={onClose} className="text-white/50 hover:text-white">
+                        <XMarkIcon className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Safety Status */}
+                <div className={`px-4 py-2 flex items-center space-x-2 text-xs font-bold uppercase tracking-widest ${data.isDangerous ? 'bg-red-500 text-white' : 'bg-green-600 text-white'}`}>
+                    {data.isDangerous ? <ExclamationTriangleIcon className="w-4 h-4" /> : <CheckCircleIcon className="w-4 h-4" />}
+                    <span>{data.safetyNote || (data.isDangerous ? "CAUTION: DANGEROUS" : "SAFE / HARMLESS")}</span>
+                </div>
+
+                {/* Details Body */}
+                <div className="p-4 space-y-4 bg-zinc-900/90">
+                    
+                    {/* ANATOMICAL FEATURE BADGE */}
+                    {data.anatomicalFeature && (
+                        <div className="flex items-center space-x-2 bg-blue-900/20 border border-blue-500/30 px-3 py-2 rounded-lg">
+                            <ViewfinderCircleIcon className="w-5 h-5 text-blue-400 animate-pulse" />
+                            <div>
+                                <div className="text-[9px] uppercase tracking-widest text-blue-500/80 font-bold">Target Focus</div>
+                                <div className="text-sm font-bold text-blue-100">{data.anatomicalFeature}</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Description */}
+                    <p className="text-sm text-zinc-300 leading-relaxed">
+                        {data.description}
+                    </p>
+
+                    {/* Confidence Meter */}
+                    <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] uppercase text-zinc-500 font-mono">
+                            <span>AI Confidence</span>
+                            <span>{data.confidence}%</span>
+                        </div>
+                        <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                            <div 
+                                className={`h-full ${data.confidence > 80 ? 'bg-blue-400' : data.confidence > 50 ? 'bg-yellow-400' : 'bg-red-400'}`} 
+                                style={{ width: `${data.confidence}%` }}
+                            ></div>
+                        </div>
+                        {data.confidence < 60 && data.photographyTips && (
+                            <div className="mt-2 flex items-start space-x-2 text-xs text-yellow-400/90 bg-yellow-900/10 p-2 rounded border border-yellow-500/20">
+                                <CameraIcon className="w-4 h-4 shrink-0" />
+                                <span>{data.photographyTips}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* External Links */}
+                    {data.links.length > 0 && (
+                        <div className="pt-2 border-t border-zinc-800">
+                            <p className="text-[10px] uppercase text-zinc-500 font-mono mb-2">Verification Sources</p>
+                            <div className="space-y-2">
+                                {data.links.map((link, idx) => (
+                                    <a 
+                                        key={idx} 
+                                        href={link.url} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="flex items-center justify-between p-2 rounded bg-zinc-800 hover:bg-zinc-700 transition-colors group"
+                                    >
+                                        <span className="text-xs text-blue-400 group-hover:text-blue-300 truncate max-w-[200px]">{link.title || link.url}</span>
+                                        <LinkIcon className="w-3 h-3 text-zinc-500" />
+                                    </a>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- NEW COMPONENT: TECH DATA CARD (BLUEPRINT STYLE) ---
+const TechDataCard = ({ data, onClose }: { data: TechData, onClose: () => void }) => {
+    return (
+        <div className="absolute top-20 right-4 md:right-8 z-50 w-80 md:w-96 animate-in slide-in-from-right-10 duration-500">
+            <div className="glass-panel rounded-xl overflow-hidden border border-cyan-500/50 shadow-[0_0_30px_rgba(6,182,212,0.2)] bg-[#0B1215]">
+                
+                {/* Industrial Header */}
+                <div className="p-4 border-b border-cyan-500/30 bg-cyan-950/30 flex items-start justify-between relative overflow-hidden">
+                    {/* Decorative Scanlines */}
+                    <div className="absolute inset-0 opacity-20 pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')]"></div>
+                    <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-cyan-500"></div>
+                    <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-cyan-500"></div>
+
+                    <div className="relative z-10">
+                        <div className="flex items-center gap-2 mb-1">
+                            <CpuChipIcon className="w-4 h-4 text-cyan-400" />
+                            <h3 className="text-xs font-mono font-bold text-cyan-400 uppercase tracking-widest">Tech-Scan</h3>
+                        </div>
+                        <h2 className="text-lg font-bold text-white leading-tight uppercase font-mono">{data.componentName}</h2>
+                        <p className="text-xs text-cyan-200/60 mt-0.5">{data.parentSystem}</p>
+                    </div>
+                    <button onClick={onClose} className="text-cyan-500/50 hover:text-cyan-400 relative z-10">
+                        <XMarkIcon className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Scale Model Alert */}
+                {data.isScaleModel && (
+                    <div className="px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-2">
+                        <CubeIcon className="w-3 h-3" />
+                        <span>Scale Model / Replica Detected</span>
+                    </div>
+                )}
+
+                {/* Body */}
+                <div className="p-4 space-y-4 bg-[#080c0e]">
+                    
+                    {/* Functional Analysis */}
+                    <div className="relative pl-3 border-l-2 border-cyan-800">
+                        <p className="text-xs text-cyan-600 font-mono mb-1 uppercase tracking-wider">Functional Analysis</p>
+                        <p className="text-sm text-zinc-300 leading-relaxed font-light">
+                            {data.function}
+                        </p>
+                    </div>
+
+                    {/* Specs Grid */}
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div className="bg-cyan-900/10 border border-cyan-800/30 p-2 rounded">
+                            <div className="text-[9px] text-cyan-500 uppercase font-mono mb-1">Material</div>
+                            <div className="text-xs text-white flex items-center gap-1.5">
+                                <BeakerIcon className="w-3 h-3 text-cyan-400" />
+                                {data.material || "Unknown"}
+                            </div>
+                        </div>
+                        <div className="bg-cyan-900/10 border border-cyan-800/30 p-2 rounded">
+                            <div className="text-[9px] text-cyan-500 uppercase font-mono mb-1">Complexity</div>
+                            <div className="text-xs text-white flex items-center gap-1.5">
+                                <CogIcon className="w-3 h-3 text-cyan-400" />
+                                {data.complexity || "Standard"}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer Decor */}
+                <div className="h-1 w-full bg-cyan-900/50 flex">
+                    <div className="w-1/3 bg-cyan-500/50"></div>
+                    <div className="w-1/3 bg-transparent"></div>
+                    <div className="w-1/3 bg-cyan-500/20"></div>
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -262,8 +445,25 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
     const [isInspectMode, setIsInspectMode] = useState(false);
     const [inspectTarget, setInspectTarget] = useState<{x: number, y: number} | null>(null);
     
+    // Auto Pilot State
+    const [autoPilotPos, setAutoPilotPos] = useState<{x: number, y: number} | null>(null);
+
+    // X-Ray / SVG Overlay State
+    const [isXRayActive, setIsXRayActive] = useState(false);
+    const [xRaySvg, setXRaySvg] = useState<string>("");
+    const [isGeneratingXRay, setIsGeneratingXRay] = useState(false);
+
+    // DATA CARDS STATE
+    const [bioData, setBioData] = useState<BioData | null>(null);
+    const [techData, setTechData] = useState<TechData | null>(null);
+
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const previewContainerRef = useRef<HTMLDivElement>(null);
+
+    // Loupe / Magnifier Refs
+    const loupeContainerRef = useRef<HTMLDivElement>(null);
+    const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
+    const [isLoupeVisible, setIsLoupeVisible] = useState(false);
 
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isChatExpanded, setIsChatExpanded] = useState(false);
@@ -271,7 +471,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
     const [messages, setMessages] = useState<{
         role: 'user' | 'ai', 
         text: string, 
-        type?: 'text' | 'patch' | 'scan',
+        type?: 'text' | 'patch' | 'scan' | 'nav',
         image?: string // Optional field to show the cropped image in chat
     }[]>([]);
     const [isChatLoading, setIsChatLoading] = useState(false);
@@ -320,6 +520,11 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         setInspectTarget(null);
         setIsPlaying(false);
         setIsPatching(false);
+        setAutoPilotPos(null);
+        setIsXRayActive(false);
+        setXRaySvg("");
+        setBioData(null);
+        setTechData(null);
     }, [creation]);
 
     useEffect(() => {
@@ -328,11 +533,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         }
     }, [messages, isChatExpanded]);
 
-    const handleSmartToolMove = (screenX: number, screenY: number) => {
-        if (isInspectMode) return;
-    };
-
-    // --- KEY FIX: Calculate Correct Coordinates respecting object-fit: contain ---
+    // ... (Keep existing calculateImageCoordinates, pctToScreen, updateLoupe, handleSmartToolMove, cropImage)
     const calculateImageCoordinates = (screenX: number, screenY: number): { xPct: number, yPct: number, valid: boolean } => {
         if (!previewContainerRef.current || !imgDims) {
             // Fallback if dimensions not loaded or container missing
@@ -389,6 +590,114 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         return { xPct, yPct, valid: true };
     };
 
+    // Helper: Convert Percentage to Screen Pixels (for Auto-Pilot)
+    const pctToScreen = (xPct: number, yPct: number) => {
+        if (!previewContainerRef.current || !imgDims) return null;
+        const container = previewContainerRef.current.getBoundingClientRect();
+        const containerRatio = container.width / container.height;
+        const imageRatio = imgDims.width / imgDims.height;
+
+        let displayedWidth, displayedHeight, offsetX, offsetY;
+
+        if (containerRatio > imageRatio) {
+            displayedHeight = container.height;
+            displayedWidth = displayedHeight * imageRatio;
+            offsetY = 0;
+            offsetX = (container.width - displayedWidth) / 2;
+        } else {
+            displayedWidth = container.width;
+            displayedHeight = displayedWidth / imageRatio;
+            offsetX = 0;
+            offsetY = (container.height - displayedHeight) / 2;
+        }
+
+        const screenX = container.left + offsetX + (displayedWidth * (xPct / 100));
+        const screenY = container.top + offsetY + (displayedHeight * (yPct / 100));
+
+        // Adjust for Probe Body offset (To center the TIP on the target)
+        // Probe Tip is at: BodyX + 28, BodyY + 80.
+        // So BodyX = TargetX - 28, BodyY = TargetY - 80.
+        return {
+            x: screenX - 28,
+            y: screenY - 80
+        };
+    };
+
+    // --- REAL-TIME LOUPE LOGIC ---
+    const updateLoupe = (xPct: number, yPct: number) => {
+        if (!creation?.originalImage || !imgDims || !loupeCanvasRef.current) return;
+
+        const ctx = loupeCanvasRef.current.getContext('2d');
+        if (!ctx) return;
+
+        const img = new Image();
+        img.src = creation.originalImage; // Note: In production with huge images, this might need optimizing, but browser cache handles it well usually.
+
+        // Size of the source area we want to show (the zoom level)
+        // We want to show a 200x200 pixel area from the source image on a 150x150 canvas
+        const zoomFactor = 0.15; // Show 15% of image width
+        const sourceW = Math.min(imgDims.width * zoomFactor, 400);
+        const sourceH = Math.min(imgDims.height * zoomFactor, 400);
+
+        const centerX = (xPct / 100) * imgDims.width;
+        const centerY = (yPct / 100) * imgDims.height;
+
+        const srcX = Math.max(0, Math.min(centerX - sourceW / 2, imgDims.width - sourceW));
+        const srcY = Math.max(0, Math.min(centerY - sourceH / 2, imgDims.height - sourceH));
+
+        // Clear and Draw
+        loupeCanvasRef.current.width = 200;
+        loupeCanvasRef.current.height = 200;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, 200, 200);
+        
+        // Draw Image
+        if (img.complete) {
+             ctx.drawImage(img, srcX, srcY, sourceW, sourceH, 0, 0, 200, 200);
+        } else {
+            // Fallback if image isn't loaded yet (rare for dataURLs)
+            img.onload = () => {
+                ctx.drawImage(img, srcX, srcY, sourceW, sourceH, 0, 0, 200, 200);
+            }
+        }
+        
+        // Draw HUD overlay on canvas
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)'; // Blue 500
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        // Crosshair
+        ctx.moveTo(100, 0); ctx.lineTo(100, 200);
+        ctx.moveTo(0, 100); ctx.lineTo(200, 100);
+        // Circle target
+        ctx.moveTo(120, 100); ctx.arc(100, 100, 20, 0, Math.PI * 2);
+        ctx.stroke();
+    };
+
+    const handleSmartToolMove = (screenX: number, screenY: number) => {
+        if (isInspectMode) return;
+
+        // 1. Calculate validity
+        const coords = calculateImageCoordinates(screenX, screenY);
+
+        if (!coords.valid) {
+            setIsLoupeVisible(false);
+            return;
+        }
+
+        // 2. Show Loupe
+        setIsLoupeVisible(true);
+
+        // 3. Move Loupe Container
+        if (loupeContainerRef.current) {
+            // Position it to the top-right of the probe to avoid blocking view
+            // The probe tip is at screenX, screenY
+            loupeContainerRef.current.style.transform = `translate(${screenX + 40}px, ${screenY - 120}px)`;
+        }
+
+        // 4. Update Canvas Content
+        updateLoupe(coords.xPct, coords.yPct);
+    };
+
     // --- NEW: Client-Side Cropping Function to eliminate Hallucination ---
     const cropImage = (xPct: number, yPct: number): string | null => {
         if (!creation?.originalImage || !imgDims) return null;
@@ -435,6 +744,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
 
     const handleProbeRelease = (screenX: number, screenY: number) => {
         setIsButtonDragging(false);
+        setIsLoupeVisible(false); // Hide Loupe
         if (!previewContainerRef.current || !onAskQuestion) return;
 
         // Use the new precise calculator
@@ -458,11 +768,21 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         setIsChatOpen(true);
         setIsChatLoading(true);
 
+        // Reset previous scan data cards
+        setBioData(null);
+        setTechData(null);
+
         // Perform the crop
         const croppedBase64 = cropImage(xPct, yPct);
         
         // Remove data header for API
         const cleanCrop = croppedBase64 ? croppedBase64.split(',')[1] : undefined;
+        
+        // Get Full Context Image
+        let fullImageContext: string | undefined;
+        if (creation?.originalImage) {
+            fullImageContext = creation.originalImage.split(',')[1];
+        }
 
         const scanMsg = `Scanning coordinates X:${xPct}% Y:${yPct}%...`;
         
@@ -475,6 +795,29 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         }]);
 
         try {
+            if (cleanCrop) {
+                // 1. ATTEMPT BIO-ANALYSIS FIRST (Field Guide Logic)
+                const bioResult = await analyzeBiologicalEntity(cleanCrop, fullImageContext);
+                
+                if (bioResult.isBiological && bioResult.confidence > 50) {
+                     setBioData(bioResult);
+                     setMessages(prev => [...prev, { role: 'ai', text: `Bio-Signature Detected: ${bioResult.commonName}. Accessing field guide...`, type: 'scan' }]);
+                     setIsChatLoading(false);
+                     return;
+                }
+
+                // 2. IF NOT BIO, ATTEMPT TECHNICAL ANALYSIS (Tech-Scanner)
+                const techResult = await analyzeTechnicalComponent(cleanCrop, fullImageContext);
+
+                if (techResult.isTechnical) {
+                    setTechData(techResult);
+                    setMessages(prev => [...prev, { role: 'ai', text: `Mechanical Structure Identified: ${techResult.componentName}. Loading schematics...`, type: 'scan' }]);
+                    setIsChatLoading(false);
+                    return;
+                }
+            }
+
+            // Fallback to standard generic response if both specific scanners fail
             const prompt = `[MICRO-ANALYSIS REQUEST] 
             I have sent you two images.
             1. The Context Image (Full view).
@@ -492,6 +835,39 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
             setIsChatLoading(false);
         }
     };
+    
+    // NEW: Handle Full Image Analysis (Global Scan)
+    const handleGlobalScan = async () => {
+        if (!creation?.originalImage) return;
+
+        setIsChatExpanded(true);
+        setIsChatOpen(true);
+        setIsChatLoading(true);
+        
+        const fullBase64 = creation.originalImage.split(',')[1];
+        
+        setMessages(prev => [...prev, { 
+            role: 'user', 
+            text: "Initiating GLOBAL SCAN of entire visual sector...", 
+            type: 'scan' 
+        }]);
+
+        try {
+            // For global scan, we pass the full image as the "target", and no context is needed (or same image)
+            const bioResult = await analyzeBiologicalEntity(fullBase64);
+            
+            if (bioResult.isBiological) {
+                 setBioData(bioResult);
+                 setMessages(prev => [...prev, { role: 'ai', text: `Primary Subject Identified: ${bioResult.commonName}.`, type: 'scan' }]);
+            } else {
+                 setMessages(prev => [...prev, { role: 'ai', text: "Global scan complete. No specific biological entity identified as primary subject.", type: 'scan' }]);
+            }
+        } catch (error) {
+            setMessages(prev => [...prev, { role: 'ai', text: "Global scan failed." }]);
+        } finally {
+            setIsChatLoading(false);
+        }
+    };
 
     const toggleSimulation = () => {
         const newState = !isPlaying;
@@ -501,6 +877,28 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                 type: 'toggleSimulation',
                 isPlaying: newState
             }, '*');
+        }
+    };
+
+    const toggleXRay = async () => {
+        if (!creation?.originalImage) return;
+
+        if (isXRayActive) {
+            setIsXRayActive(false);
+            return;
+        }
+
+        // Turn on
+        setIsXRayActive(true);
+
+        // If no SVG yet, generate it
+        if (!xRaySvg && !isGeneratingXRay) {
+             setIsGeneratingXRay(true);
+             const base64 = creation.originalImage.split(',')[1];
+             const mime = creation.originalImage.split(';')[0].split(':')[1];
+             const svg = await generateSchematicOverlay(base64, mime);
+             setXRaySvg(svg);
+             setIsGeneratingXRay(false);
         }
     };
 
@@ -541,6 +939,32 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
         setIsChatLoading(true);
 
+        // 1. AUTO-PILOT DETECTION (Locate/Find/Cari/Mana)
+        const isFindRequest = /find|locate|search|where is|cari|mana|detect/i.test(userMsg);
+        
+        if (isFindRequest && creation?.originalImage) {
+            setMessages(prev => [...prev, { role: 'ai', text: "Scanning visual matrix...", type: 'nav' }]);
+            const base64 = creation.originalImage.split(',')[1];
+            const mime = creation.originalImage.split(';')[0].split(':')[1];
+            
+            const result = await locateObject(userMsg, base64, mime);
+            
+            if (result.found) {
+                const screenPos = pctToScreen(result.x, result.y);
+                if (screenPos) {
+                    setMessages(prev => [...prev, { role: 'ai', text: `Target Acquired: ${result.label}. Initiating auto-navigation.`, type: 'nav' }]);
+                    setAutoPilotPos(screenPos); // Triggers SmartFloatingButton movement
+                } else {
+                     setMessages(prev => [...prev, { role: 'ai', text: "Target found, but off-screen coordinates." }]);
+                }
+            } else {
+                 setMessages(prev => [...prev, { role: 'ai', text: "Negative contact. Object not found in visual sector." }]);
+            }
+            setIsChatLoading(false);
+            return;
+        }
+
+        // 2. PATCHING DETECTION
         const isModificationRequest = /fix|change|broken|doesn't work|add|remove|modify|adjust|salah|rosak|tak boleh/i.test(userMsg);
 
         if (isModificationRequest) {
@@ -557,6 +981,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                 setIsChatLoading(false);
             }
         } else {
+            // 3. GENERAL QA
             try {
                 const response = await onAskQuestion(userMsg);
                 setMessages(prev => [...prev, { role: 'ai', text: response }]);
@@ -590,15 +1015,49 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         }
       `}
     >
-      {/* Floating Smart Probe - Draggable Scanner */}
+      {/* Floating Smart Probe - Draggable Scanner & Auto-Pilot */}
       {!isLoading && creation && !isInspectMode && (
         <SmartFloatingButton 
-            onDragStart={() => setIsButtonDragging(true)} 
+            onDragStart={() => {
+                setIsButtonDragging(true);
+                setAutoPilotPos(null); // Cancel auto-pilot on manual interaction
+            }} 
             onDragEnd={handleProbeRelease}
             onMove={handleSmartToolMove}
             isScanning={isChatLoading && messages[messages.length-1]?.type === 'scan'}
+            moveTo={autoPilotPos} // Pass the auto-pilot target
         />
       )}
+
+      {/* TACTICAL LOUPE - Real-time Magnifying Glass */}
+      <div 
+        ref={loupeContainerRef}
+        className={`fixed z-[10001] pointer-events-none transition-opacity duration-200 ${isLoupeVisible ? 'opacity-100' : 'opacity-0'}`}
+        style={{ top: 0, left: 0 }}
+      >
+         <div className="relative">
+             {/* The Glass */}
+             <div className="w-40 h-40 rounded-full border-2 border-blue-400 bg-black overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.5)] backdrop-blur-0">
+                 <canvas ref={loupeCanvasRef} className="w-full h-full object-cover" />
+                 
+                 {/* Digital Overlays */}
+                 <div className="absolute inset-0 bg-blue-500/10 mix-blend-overlay"></div>
+                 <div className="absolute inset-0 rounded-full border border-white/20"></div>
+                 
+                 {/* Scanning Line Animation */}
+                 <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-400/20 to-transparent w-full h-2 animate-[scan_1s_infinite]"></div>
+             </div>
+
+             {/* Connection Line to Probe */}
+             <div className="absolute top-20 -left-10 w-10 h-[1px] bg-blue-500/50"></div>
+             <div className="absolute top-20 -left-10 w-1 h-1 bg-blue-500 rounded-full"></div>
+
+             {/* Tech Label */}
+             <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-blue-900/80 text-blue-200 text-[9px] font-mono px-2 py-0.5 rounded border border-blue-500/50 whitespace-nowrap">
+                LIVE FEED [200%]
+             </div>
+         </div>
+      </div>
 
       {/* Header */}
       <div className="bg-[#121214] px-4 py-3 flex items-center justify-between border-b border-zinc-800 shrink-0">
@@ -626,6 +1085,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         <div className="flex items-center justify-end space-x-1 w-fit">
             {!isLoading && creation && (
                 <>  
+                     {/* Play / Pause Simulation */}
                      <button 
                         onClick={toggleSimulation}
                         title={isPlaying ? "Stop Simulation" : "Start Active Simulation"}
@@ -641,6 +1101,30 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                         </span>
                     </button>
 
+                     {/* X-Ray Mode Toggle */}
+                     <button 
+                        onClick={toggleXRay}
+                        title="Toggle X-Ray Schematic Layer"
+                        className={`p-1.5 rounded-md transition-all flex items-center gap-2 mr-2 border ${
+                            isXRayActive 
+                            ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' 
+                            : 'text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800 border-transparent'
+                        }`}
+                    >
+                        <EyeIcon className="w-4 h-4" />
+                        {isXRayActive && <span className="text-xs font-bold uppercase tracking-wide hidden sm:inline">X-RAY</span>}
+                    </button>
+
+                    {/* NEW: Global Scan Button */}
+                    <button 
+                        onClick={handleGlobalScan}
+                        title="Identify Subject (Global Scan)"
+                        className="p-1.5 rounded-md transition-all flex items-center gap-2 mr-2 text-zinc-500 hover:text-purple-400 hover:bg-zinc-800 border-transparent"
+                    >
+                        <PhotoIcon className="w-4 h-4" />
+                    </button>
+
+                    {/* Manual Scan Mode */}
                     <button 
                         onClick={toggleInspectMode}
                         title={isInspectMode ? "Cancel Manual Scan" : "Click-to-Scan Mode"}
@@ -714,6 +1198,39 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         {creation && !isLoading && (
              <div className="w-full h-full flex relative">
                  
+                 {/* BIO-DATA CARD OVERLAY */}
+                 {bioData && <BioDataCard data={bioData} onClose={() => setBioData(null)} />}
+
+                 {/* TECH-DATA CARD OVERLAY (NEW) */}
+                 {techData && <TechDataCard data={techData} onClose={() => setTechData(null)} />}
+
+                 {/* X-RAY LAYER (SVG OVERLAY) */}
+                 {isXRayActive && (
+                    <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden flex items-center justify-center">
+                        {isGeneratingXRay ? (
+                            <div className="flex items-center space-x-2 bg-black/80 px-4 py-2 rounded-full border border-cyan-500/50 animate-pulse">
+                                <SparklesIcon className="w-4 h-4 text-cyan-400" />
+                                <span className="text-xs text-cyan-400 font-mono">GENERATING SCHEMATICS...</span>
+                            </div>
+                        ) : xRaySvg ? (
+                            // Render the SVG overlaid on the image/simulation
+                            // We use object-fit logic similar to the image to ensure alignment
+                            // For simplicity in this iteration, we assume 'contain' sizing matches the simulation iframe
+                            <div className="relative w-full h-full">
+                                <svg 
+                                    viewBox="0 0 100 100" 
+                                    preserveAspectRatio="none"
+                                    className="w-full h-full opacity-80"
+                                    dangerouslySetInnerHTML={{ __html: xRaySvg }}
+                                />
+                                {/* Grid texture overlay */}
+                                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-overlay"></div>
+                                <div className="absolute inset-0 border-2 border-cyan-500/30"></div>
+                            </div>
+                        ) : null}
+                    </div>
+                 )}
+
                  {/* Manual Inspection Overlay */}
                  {isInspectMode && (
                     <div 
@@ -788,7 +1305,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                             <div className="text-zinc-600 text-[11px] space-y-2">
                                 <p>{">"} System Initialized.</p>
                                 <p>{">"} Drag the Smart Probe to any component to analyze it.</p>
-                                <p>{">"} Type commands to modify logic (e.g., "Fan is too slow").</p>
+                                <p>{">"} Type "Find [component]" to auto-navigate.</p>
                             </div>
                         )}
                         {messages.map((msg, idx) => (
@@ -800,10 +1317,13 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                                             : 'bg-zinc-800/50 text-blue-200 border-zinc-700' 
                                     : msg.type === 'patch'
                                         ? 'bg-green-900/20 text-green-400 border-green-900/50'
-                                        : 'bg-zinc-900 text-zinc-300 border-zinc-800'
+                                        : msg.type === 'nav'
+                                            ? 'bg-amber-900/20 text-amber-400 border-amber-900/50'
+                                            : 'bg-zinc-900 text-zinc-300 border-zinc-800'
                                 }`}>
                                     {msg.type === 'patch' && <WrenchScrewdriverIcon className="w-3 h-3 inline mr-2" />}
                                     {msg.type === 'scan' && <ViewfinderCircleIcon className="w-3 h-3 inline mr-2 animate-pulse" />}
+                                    {msg.type === 'nav' && <BoltIcon className="w-3 h-3 inline mr-2 animate-bounce" />}
                                     
                                     {/* Show Cropped Image Thumbnail if available */}
                                     {msg.image && (
@@ -829,7 +1349,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                             type="text"
                             value={chatInput}
                             onChange={(e) => setChatInput(e.target.value)}
-                            placeholder="Enter command..."
+                            placeholder="Enter command or 'find [obj]'..."
                             className="flex-1 bg-transparent border-none focus:ring-0 text-xs text-zinc-200 font-mono placeholder-zinc-700"
                             autoFocus={!!inspectTarget}
                         />

@@ -2,11 +2,12 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, SchemaType } from "@google/genai";
 
 // Using gemini-3-pro-preview for advanced logic and SVG generation
 const GEMINI_MODEL = 'gemini-3-pro-preview';
-const QA_MODEL = 'gemini-2.5-flash';
+// UPGRADED to 3.0 Pro for precision object identification per user request
+const QA_MODEL = 'gemini-3-pro-preview';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -241,7 +242,7 @@ export async function askQuestion(question: string, fileBase64?: string, mimeTyp
   
   // Enhanced prompt for spatial awareness and micro-analysis
   const systemContext = `
-  You are an expert technical analyst AI.
+  You are an expert technical analyst AI using Gemini 3.0 Pro.
   
   YOUR TASKS:
   1. I will provide you with a MAIN image (Context) and optionally a ZOOMED/CROPPED image.
@@ -287,4 +288,247 @@ export async function askQuestion(question: string, fileBase64?: string, mimeTyp
     console.error("Gemini Q&A Error:", error);
     return "Error analyzing content.";
   }
+}
+
+// --- NEW FEATURES FOR KINETIX 2.0 ---
+
+// 1. AUTO-PILOT PROBE: Locates an object and returns coordinates
+export async function locateObject(query: string, fileBase64: string, mimeType: string): Promise<{found: boolean, x: number, y: number, label: string}> {
+    const prompt = `
+    Analyze the image. Locate the object described as: "${query}".
+    Return the coordinates of the CENTER of this object as percentages (0-100) relative to the image width and height.
+    
+    Response format (JSON ONLY):
+    {
+        "found": true/false,
+        "x": number (percentage 0-100),
+        "y": number (percentage 0-100),
+        "label": "short name of object found"
+    }
+    If not found, set "found": false.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: QA_MODEL,
+            contents: {
+                parts: [
+                    { text: prompt },
+                    { inlineData: { data: fileBase64, mimeType: mimeType } }
+                ]
+            },
+            config: {
+                responseMimeType: "application/json"
+            }
+        });
+        
+        const text = response.text;
+        if (!text) return { found: false, x: 50, y: 50, label: "Not found" };
+        
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Locate Object Error", e);
+        return { found: false, x: 50, y: 50, label: "Error" };
+    }
+}
+
+// 2. X-RAY LAYER: Generates a schematic SVG overlay
+export async function generateSchematicOverlay(fileBase64: string, mimeType: string): Promise<string> {
+    const prompt = `
+    Generate an SVG Overlay (X-Ray View) for this image.
+    1. Detect the edges of main components (walls, circuits, parts).
+    2. Create an SVG string with viewBox="0 0 100 100" (preserveAspectRatio="none").
+    3. Use <path>, <rect>, or <circle> elements.
+    4. Style: stroke="cyan" stroke-width="0.5" fill="none" opacity="0.8".
+    5. Do NOT include <svg> tag wrapper, just the inner elements (groups/paths).
+    6. Keep it abstract and high-tech (HUD style).
+    
+    Output: ONLY the SVG inner XML string.
+    `;
+
+    try {
+         const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: {
+                parts: [
+                    { text: prompt },
+                    { inlineData: { data: fileBase64, mimeType: mimeType } }
+                ]
+            }
+        });
+
+        let svg = response.text || "";
+        svg = svg.replace(/```xml/g, '').replace(/```/g, '').trim();
+        return svg;
+    } catch (e) {
+        console.error("X-Ray Gen Error", e);
+        return "";
+    }
+}
+
+// 3. BIO-SCANNER: Deep taxonomy and safety analysis
+export interface BioData {
+    isBiological: boolean;
+    commonName: string;
+    scientificName: string; // Genus Species
+    anatomicalFeature?: string; // NEW: Specific body part identified in the crop
+    family: string;
+    description: string;
+    confidence: number; // 0-100
+    isDangerous: boolean;
+    safetyNote: string; // e.g., "Venomous sting" or "Harmless"
+    links: { title: string, url: string }[];
+    photographyTips?: string; // Only if confidence < 60
+}
+
+export async function analyzeBiologicalEntity(targetBase64: string, contextBase64?: string): Promise<BioData> {
+    const parts: any[] = [];
+
+    // Construct a context-aware prompt
+    const prompt = `
+    Analyze this biological subject for Field Study / Biological Research.
+    
+    I have provided TWO images (if available).
+    1. **TARGET IMAGE (Crop/Focus)**: This is exactly where the probe is pointing.
+    2. **CONTEXT IMAGE (Full View)**: This shows the whole creature.
+
+    **CRITICAL INSTRUCTIONS:**
+    1. Use the CONTEXT image to identify the species (e.g. Mosquito, Centipede).
+    2. Use the TARGET image to identify the **SPECIFIC ANATOMICAL PART** being scanned (e.g. Proboscis, Antenna, Compound Eye, Tarsus, Mandibles).
+    3. If the TARGET is just the general body, leave 'anatomicalFeature' empty or put "Torso/Body".
+    
+    Return strict JSON format:
+    {
+        "isBiological": boolean, 
+        "commonName": "string", // Species Name (e.g. Aedes Mosquito)
+        "scientificName": "Genus species",
+        "anatomicalFeature": "string", // The specific part found in the TARGET image (e.g. "Proboscis")
+        "family": "string",
+        "description": "Short biological summary of the SPECIES and the PART (2 sentences).",
+        "confidence": number, // 0-100
+        "isDangerous": boolean, 
+        "safetyNote": "string",
+        "links": [
+             { "title": "Wiki", "url": "https://en.wikipedia.org/wiki/Genus_species" },
+             { "title": "Scientific DB", "url": "valid search URL" }
+        ],
+        "photographyTips": "string" 
+    }
+    
+    If it is NOT biological, set "isBiological": false.
+    `;
+    
+    parts.push({ text: prompt });
+    
+    // Image 1: Target (Focus)
+    parts.push({ text: "IMAGE 1: TARGET (ANATOMICAL CROP)" });
+    parts.push({ inlineData: { data: targetBase64, mimeType: "image/jpeg" } });
+
+    // Image 2: Context (Optional Full View)
+    if (contextBase64) {
+        parts.push({ text: "IMAGE 2: CONTEXT (FULL VIEW)" });
+        parts.push({ inlineData: { data: contextBase64, mimeType: "image/jpeg" } });
+    }
+
+    try {
+        const response = await ai.models.generateContent({
+            model: QA_MODEL,
+            contents: {
+                parts: parts
+            },
+            config: {
+                responseMimeType: "application/json"
+            }
+        });
+        
+        const text = response.text;
+        if (!text) throw new Error("No response");
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Bio Scan Error", e);
+        return {
+            isBiological: false,
+            commonName: "Unknown",
+            scientificName: "",
+            family: "",
+            description: "Scan failed.",
+            confidence: 0,
+            isDangerous: false,
+            safetyNote: "",
+            links: []
+        };
+    }
+}
+
+// 4. TECH-SCANNER: Engineering analysis for machines/circuits
+export interface TechData {
+    isTechnical: boolean;
+    componentName: string; // e.g. "Rocket Nozzle", "Microcontroller"
+    parentSystem: string; // e.g. "Saturn V Rocket", "Arduino Board"
+    function: string; // Explanation of what the part does
+    material?: string; // e.g. "Titanium Alloy", "Silicon"
+    isScaleModel: boolean; // Detect if it's a toy/model
+    complexity: string; // Low, Medium, High
+}
+
+export async function analyzeTechnicalComponent(targetBase64: string, contextBase64?: string): Promise<TechData> {
+    const parts: any[] = [];
+
+    const prompt = `
+    Analyze this mechanical/technical subject as a Senior Engineer.
+    
+    I have provided TWO images (if available).
+    1. **TARGET IMAGE (Crop/Focus)**: This is exactly where the probe is pointing.
+    2. **CONTEXT IMAGE (Full View)**: This shows the whole machine/object.
+    
+    **CRITICAL INSTRUCTIONS:**
+    1. Identify the **SPECIFIC COMPONENT** in the TARGET image (e.g. Fuel Injector, Wheel Flange, Capacitor).
+    2. Identify the **PARENT SYSTEM** from the CONTEXT (e.g. Steam Locomotive, Motherboard).
+    3. Explain the **FUNCTION** of the component (physics/engineering purpose).
+    4. Detect if this is a real machine or a **Scale Model / Toy**. If it is a model, analyze it as if it were the real thing, but set isScaleModel: true.
+    
+    Return strict JSON format:
+    {
+        "isTechnical": boolean, // true for machines, electronics, blueprints, vehicles
+        "componentName": "string",
+        "parentSystem": "string",
+        "function": "string", // Concise engineering explanation (2 sentences)
+        "material": "string", // Best guess (e.g. Steel, Plastic, Gold)
+        "isScaleModel": boolean,
+        "complexity": "string" // "Low", "Medium", "High", "Extreme"
+    }
+    
+    If it is NOT technical/mechanical, set "isTechnical": false.
+    `;
+    
+    parts.push({ text: prompt });
+    parts.push({ text: "IMAGE 1: TARGET (COMPONENT CROP)" });
+    parts.push({ inlineData: { data: targetBase64, mimeType: "image/jpeg" } });
+
+    if (contextBase64) {
+        parts.push({ text: "IMAGE 2: CONTEXT (FULL SYSTEM)" });
+        parts.push({ inlineData: { data: contextBase64, mimeType: "image/jpeg" } });
+    }
+
+    try {
+        const response = await ai.models.generateContent({
+            model: QA_MODEL,
+            contents: { parts: parts },
+            config: { responseMimeType: "application/json" }
+        });
+        
+        const text = response.text;
+        if (!text) throw new Error("No response");
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Tech Scan Error", e);
+        return {
+            isTechnical: false,
+            componentName: "Unknown",
+            parentSystem: "",
+            function: "",
+            isScaleModel: false,
+            complexity: "Low"
+        };
+    }
 }
