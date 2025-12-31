@@ -14,6 +14,7 @@ interface LivePreviewProps {
   isFocused: boolean;
   onReset: () => void;
   onAskQuestion?: (question: string, croppedBase64?: string) => Promise<string>;
+  modelId: string; // NEW PROP: The selected AI Model ID
 }
 
 declare global {
@@ -436,7 +437,7 @@ const PdfRenderer = ({ dataUrl }: { dataUrl: string }) => {
   );
 };
 
-export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, isFocused, onReset, onAskQuestion }) => {
+export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, isFocused, onReset, onAskQuestion, modelId }) => {
     const [loadingStep, setLoadingStep] = useState(0);
     const [showSplitView, setShowSplitView] = useState(false);
     const [isButtonDragging, setIsButtonDragging] = useState(false);
@@ -797,7 +798,8 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         try {
             if (cleanCrop) {
                 // 1. ATTEMPT BIO-ANALYSIS FIRST (Field Guide Logic)
-                const bioResult = await analyzeBiologicalEntity(cleanCrop, fullImageContext);
+                // Pass modelId to service
+                const bioResult = await analyzeBiologicalEntity(cleanCrop, fullImageContext, modelId);
                 
                 if (bioResult.isBiological && bioResult.confidence > 50) {
                      setBioData(bioResult);
@@ -807,7 +809,8 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                 }
 
                 // 2. IF NOT BIO, ATTEMPT TECHNICAL ANALYSIS (Tech-Scanner)
-                const techResult = await analyzeTechnicalComponent(cleanCrop, fullImageContext);
+                // Pass modelId to service
+                const techResult = await analyzeTechnicalComponent(cleanCrop, fullImageContext, modelId);
 
                 if (techResult.isTechnical) {
                     setTechData(techResult);
@@ -853,8 +856,8 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
         }]);
 
         try {
-            // For global scan, we pass the full image as the "target", and no context is needed (or same image)
-            const bioResult = await analyzeBiologicalEntity(fullBase64);
+            // Pass modelId
+            const bioResult = await analyzeBiologicalEntity(fullBase64, undefined, modelId);
             
             if (bioResult.isBiological) {
                  setBioData(bioResult);
@@ -896,7 +899,8 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
              setIsGeneratingXRay(true);
              const base64 = creation.originalImage.split(',')[1];
              const mime = creation.originalImage.split(';')[0].split(':')[1];
-             const svg = await generateSchematicOverlay(base64, mime);
+             // Pass modelId
+             const svg = await generateSchematicOverlay(base64, mime, modelId);
              setXRaySvg(svg);
              setIsGeneratingXRay(false);
         }
@@ -947,7 +951,8 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
             const base64 = creation.originalImage.split(',')[1];
             const mime = creation.originalImage.split(';')[0].split(':')[1];
             
-            const result = await locateObject(userMsg, base64, mime);
+            // Pass modelId
+            const result = await locateObject(userMsg, base64, mime, modelId);
             
             if (result.found) {
                 const screenPos = pctToScreen(result.x, result.y);
@@ -971,7 +976,8 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
             try {
                 setMessages(prev => [...prev, { role: 'ai', text: "Analyzing code logic for repairs...", type: 'text' }]);
                 setIsPatching(true);
-                const patchedHtml = await refineSimulation(currentHtml, userMsg);
+                // Pass modelId
+                const patchedHtml = await refineSimulation(currentHtml, userMsg, modelId);
                 setCurrentHtml(patchedHtml);
                 setMessages(prev => [...prev, { role: 'ai', text: "System patched. Logic updated.", type: 'patch' }]);
             } catch (error) {
@@ -1304,6 +1310,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                         {messages.length === 0 && (
                             <div className="text-zinc-600 text-[11px] space-y-2">
                                 <p>{">"} System Initialized.</p>
+                                <p>{">"} Current Engine: <span className="text-blue-400">{modelId}</span></p>
                                 <p>{">"} Drag the Smart Probe to any component to analyze it.</p>
                                 <p>{">"} Type "Find [component]" to auto-navigate.</p>
                             </div>

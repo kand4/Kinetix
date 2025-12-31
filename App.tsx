@@ -7,14 +7,17 @@ import { Hero } from './components/Hero';
 import { InputArea } from './components/InputArea';
 import { LivePreview } from './components/LivePreview';
 import { CreationHistory, Creation } from './components/CreationHistory';
-import { bringToLife, askQuestion } from './services/gemini';
-import { ArrowUpTrayIcon } from '@heroicons/react/24/solid';
+import { bringToLife, askQuestion, AVAILABLE_MODELS } from './services/gemini';
+import { ArrowUpTrayIcon, CpuChipIcon } from '@heroicons/react/24/solid';
 
 const App: React.FC = () => {
   const [activeCreation, setActiveCreation] = useState<Creation | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<Creation[]>([]);
   const importInputRef = useRef<HTMLInputElement>(null);
+  
+  // New State: Selected Model ID
+  const [selectedModel, setSelectedModel] = useState<string>(AVAILABLE_MODELS[0].id);
 
   // Load history from local storage or fetch examples on mount
   useEffect(() => {
@@ -123,7 +126,8 @@ const App: React.FC = () => {
         mimeType = file.type.toLowerCase();
       }
 
-      const html = await bringToLife(promptText, imageBase64, mimeType);
+      // Pass selectedModel to the service
+      const html = await bringToLife(promptText, imageBase64, mimeType, selectedModel);
       
       if (html) {
         const newCreation: Creation = {
@@ -146,7 +150,7 @@ const App: React.FC = () => {
     }
   };
 
-  // Modified to accept optional cropped image
+  // Modified to accept optional cropped image and pass the selected model
   const handleAskQuestion = async (question: string, croppedBase64?: string): Promise<string> => {
     if (!activeCreation) return "No active creation.";
     
@@ -161,7 +165,7 @@ const App: React.FC = () => {
         }
     }
 
-    return await askQuestion(question, imageBase64, mimeType, croppedBase64);
+    return await askQuestion(question, imageBase64, mimeType, croppedBase64, selectedModel);
   };
 
   const handleReset = () => {
@@ -244,6 +248,28 @@ const App: React.FC = () => {
               <Hero />
           </div>
 
+          {/* Model Selector UI */}
+          <div className="w-full max-w-xl mx-auto mb-6">
+              <div className="flex items-center justify-center space-x-3 bg-zinc-900/40 backdrop-blur border border-zinc-800 rounded-full p-1.5 px-4 shadow-xl">
+                  <div className="flex items-center gap-2 text-zinc-400">
+                      <CpuChipIcon className="w-5 h-5" />
+                      <span className="text-xs font-mono font-bold uppercase tracking-wider hidden sm:inline">Engine:</span>
+                  </div>
+                  <select 
+                      value={selectedModel} 
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      className="bg-transparent text-sm text-blue-400 font-bold focus:outline-none cursor-pointer hover:text-blue-300 transition-colors"
+                  >
+                      {AVAILABLE_MODELS.map(model => (
+                          <option key={model.id} value={model.id} className="bg-zinc-900 text-zinc-300">
+                              {model.name}
+                          </option>
+                      ))}
+                  </select>
+                  <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e] animate-pulse"></div>
+              </div>
+          </div>
+
           {/* 2. Input Section */}
           <div className="w-full flex justify-center mb-8">
               <InputArea onGenerate={handleGenerate} isGenerating={isGenerating} disabled={isFocused} />
@@ -275,6 +301,7 @@ const App: React.FC = () => {
         isFocused={isFocused}
         onReset={handleReset}
         onAskQuestion={handleAskQuestion}
+        modelId={selectedModel} // Pass selected model down
       />
 
       {/* Subtle Import Button (Bottom Right) */}

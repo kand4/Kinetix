@@ -4,10 +4,13 @@
 */
 import { GoogleGenAI, GenerateContentResponse, SchemaType } from "@google/genai";
 
-// Using gemini-3-pro-preview for advanced logic and SVG generation
-const GEMINI_MODEL = 'gemini-3-pro-preview';
-// UPGRADED to 3.0 Pro for precision object identification per user request
-const QA_MODEL = 'gemini-3-pro-preview';
+// Default fallback if nothing passed
+const DEFAULT_MODEL = 'gemini-2.5-flash-latest';
+
+export const AVAILABLE_MODELS = [
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro (Max Intelligence)', description: 'Best for complex logic & schematics.' },
+    { id: 'gemini-2.5-flash-latest', name: 'Gemini 2.5 Flash (High Speed)', description: 'Fastest response, unlimited quota.' }
+];
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -128,7 +131,7 @@ function loop() {
 Return ONLY the raw HTML string (with embedded CSS/JS).
 `;
 
-export async function bringToLife(prompt: string, fileBase64?: string, mimeType?: string): Promise<string> {
+export async function bringToLife(prompt: string, fileBase64?: string, mimeType?: string, modelId: string = DEFAULT_MODEL): Promise<string> {
   const parts: any[] = [];
   
   const basePrompt = fileBase64 
@@ -148,7 +151,7 @@ export async function bringToLife(prompt: string, fileBase64?: string, mimeType?
 
   try {
     const response: GenerateContentResponse = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: modelId,
       contents: {
         parts: parts
       },
@@ -175,7 +178,7 @@ export async function bringToLife(prompt: string, fileBase64?: string, mimeType?
 }
 
 // NEW: Refine Logic Function for Hot-Patching
-export async function refineSimulation(currentHtml: string, instruction: string): Promise<string> {
+export async function refineSimulation(currentHtml: string, instruction: string, modelId: string = DEFAULT_MODEL): Promise<string> {
     // Optimization: Remove the huge base64 string to save context window. We will put it back later.
     const imagePlaceholder = "__IMAGE_PLACEHOLDER__";
     // Regex to find the base64 src
@@ -217,7 +220,7 @@ export async function refineSimulation(currentHtml: string, instruction: string)
 
     try {
         const response: GenerateContentResponse = await ai.models.generateContent({
-            model: GEMINI_MODEL,
+            model: modelId,
             contents: { parts: [{ text: prompt }] },
         });
 
@@ -237,12 +240,12 @@ export async function refineSimulation(currentHtml: string, instruction: string)
     }
 }
 
-export async function askQuestion(question: string, fileBase64?: string, mimeType?: string, croppedBase64?: string): Promise<string> {
+export async function askQuestion(question: string, fileBase64?: string, mimeType?: string, croppedBase64?: string, modelId: string = DEFAULT_MODEL): Promise<string> {
   const parts: any[] = [];
   
   // Enhanced prompt for spatial awareness and micro-analysis
   const systemContext = `
-  You are an expert technical analyst AI using Gemini 3.0 Pro.
+  You are an expert technical analyst AI using ${modelId}.
   
   YOUR TASKS:
   1. I will provide you with a MAIN image (Context) and optionally a ZOOMED/CROPPED image.
@@ -280,7 +283,7 @@ export async function askQuestion(question: string, fileBase64?: string, mimeTyp
 
   try {
     const response: GenerateContentResponse = await ai.models.generateContent({
-      model: QA_MODEL,
+      model: modelId,
       contents: { parts: parts },
     });
     return response.text || "No answer generated.";
@@ -293,7 +296,7 @@ export async function askQuestion(question: string, fileBase64?: string, mimeTyp
 // --- NEW FEATURES FOR KINETIX 2.0 ---
 
 // 1. AUTO-PILOT PROBE: Locates an object and returns coordinates
-export async function locateObject(query: string, fileBase64: string, mimeType: string): Promise<{found: boolean, x: number, y: number, label: string}> {
+export async function locateObject(query: string, fileBase64: string, mimeType: string, modelId: string = DEFAULT_MODEL): Promise<{found: boolean, x: number, y: number, label: string}> {
     const prompt = `
     Analyze the image. Locate the object described as: "${query}".
     Return the coordinates of the CENTER of this object as percentages (0-100) relative to the image width and height.
@@ -310,7 +313,7 @@ export async function locateObject(query: string, fileBase64: string, mimeType: 
 
     try {
         const response = await ai.models.generateContent({
-            model: QA_MODEL,
+            model: modelId,
             contents: {
                 parts: [
                     { text: prompt },
@@ -333,7 +336,7 @@ export async function locateObject(query: string, fileBase64: string, mimeType: 
 }
 
 // 2. X-RAY LAYER: Generates a schematic SVG overlay
-export async function generateSchematicOverlay(fileBase64: string, mimeType: string): Promise<string> {
+export async function generateSchematicOverlay(fileBase64: string, mimeType: string, modelId: string = DEFAULT_MODEL): Promise<string> {
     const prompt = `
     Generate an SVG Overlay (X-Ray View) for this image.
     1. Detect the edges of main components (walls, circuits, parts).
@@ -348,7 +351,7 @@ export async function generateSchematicOverlay(fileBase64: string, mimeType: str
 
     try {
          const response = await ai.models.generateContent({
-            model: GEMINI_MODEL,
+            model: modelId,
             contents: {
                 parts: [
                     { text: prompt },
@@ -381,7 +384,7 @@ export interface BioData {
     photographyTips?: string; // Only if confidence < 60
 }
 
-export async function analyzeBiologicalEntity(targetBase64: string, contextBase64?: string): Promise<BioData> {
+export async function analyzeBiologicalEntity(targetBase64: string, contextBase64?: string, modelId: string = DEFAULT_MODEL): Promise<BioData> {
     const parts: any[] = [];
 
     // Construct a context-aware prompt
@@ -397,20 +400,29 @@ export async function analyzeBiologicalEntity(targetBase64: string, contextBase6
     2. Use the TARGET image to identify the **SPECIFIC ANATOMICAL PART** being scanned (e.g. Proboscis, Antenna, Compound Eye, Tarsus, Mandibles).
     3. If the TARGET is just the general body, leave 'anatomicalFeature' empty or put "Torso/Body".
     
+    **STRICT LINK GENERATION RULES (NO 404s):**
+    Do NOT guess specific article URLs (like cdc.gov/insects/mosquito.html) as they often change and break (404).
+    Instead, construct **DYNAMIC SEARCH URLs** to high-authority databases using the Scientific Name.
+    
+    Use these formats for 'links':
+    - PubMed: "https://pubmed.ncbi.nlm.nih.gov/?term=" + Scientific Name
+    - Google Scholar: "https://scholar.google.com/scholar?q=" + Scientific Name
+    - GBIF: "https://www.gbif.org/species/search?q=" + Scientific Name
+    
     Return strict JSON format:
     {
         "isBiological": boolean, 
-        "commonName": "string", // Species Name (e.g. Aedes Mosquito)
+        "commonName": "string", 
         "scientificName": "Genus species",
-        "anatomicalFeature": "string", // The specific part found in the TARGET image (e.g. "Proboscis")
+        "anatomicalFeature": "string",
         "family": "string",
         "description": "Short biological summary of the SPECIES and the PART (2 sentences).",
         "confidence": number, // 0-100
         "isDangerous": boolean, 
         "safetyNote": "string",
         "links": [
-             { "title": "Wiki", "url": "https://en.wikipedia.org/wiki/Genus_species" },
-             { "title": "Scientific DB", "url": "valid search URL" }
+             { "title": "PubMed Research", "url": "..." },
+             { "title": "Google Scholar", "url": "..." }
         ],
         "photographyTips": "string" 
     }
@@ -432,7 +444,7 @@ export async function analyzeBiologicalEntity(targetBase64: string, contextBase6
 
     try {
         const response = await ai.models.generateContent({
-            model: QA_MODEL,
+            model: modelId,
             contents: {
                 parts: parts
             },
@@ -471,7 +483,7 @@ export interface TechData {
     complexity: string; // Low, Medium, High
 }
 
-export async function analyzeTechnicalComponent(targetBase64: string, contextBase64?: string): Promise<TechData> {
+export async function analyzeTechnicalComponent(targetBase64: string, contextBase64?: string, modelId: string = DEFAULT_MODEL): Promise<TechData> {
     const parts: any[] = [];
 
     const prompt = `
@@ -512,7 +524,7 @@ export async function analyzeTechnicalComponent(targetBase64: string, contextBas
 
     try {
         const response = await ai.models.generateContent({
-            model: QA_MODEL,
+            model: modelId,
             contents: { parts: parts },
             config: { responseMimeType: "application/json" }
         });
