@@ -399,10 +399,10 @@ export async function analyzeBiologicalEntity(targetBase64: string, contextBase6
     1. Use the CONTEXT image to identify the species (e.g. Mosquito, Centipede).
     2. Use the TARGET image to identify the **SPECIFIC ANATOMICAL PART** being scanned (e.g. Proboscis, Antenna, Compound Eye, Tarsus, Mandibles).
     3. If the TARGET is just the general body, leave 'anatomicalFeature' empty or put "Torso/Body".
+    4. **CONFIDENCE SCORE:** Estimate your confidence (0-100) based on image clarity and distinctive features.
     
     **STRICT LINK GENERATION RULES (NO 404s):**
-    Do NOT guess specific article URLs (like cdc.gov/insects/mosquito.html) as they often change and break (404).
-    Instead, construct **DYNAMIC SEARCH URLs** to high-authority databases using the Scientific Name.
+    Do NOT guess specific article URLs. Construct **DYNAMIC SEARCH URLs** to high-authority databases using the Scientific Name.
     
     Use these formats for 'links':
     - PubMed: "https://pubmed.ncbi.nlm.nih.gov/?term=" + Scientific Name
@@ -416,7 +416,7 @@ export async function analyzeBiologicalEntity(targetBase64: string, contextBase6
         "scientificName": "Genus species",
         "anatomicalFeature": "string",
         "family": "string",
-        "description": "Short biological summary of the SPECIES and the PART (2 sentences).",
+        "description": "Short biological summary.",
         "confidence": number, // 0-100
         "isDangerous": boolean, 
         "safetyNote": "string",
@@ -481,6 +481,7 @@ export interface TechData {
     material?: string; // e.g. "Titanium Alloy", "Silicon"
     isScaleModel: boolean; // Detect if it's a toy/model
     complexity: string; // Low, Medium, High
+    confidence: number; // 0-100
 }
 
 export async function analyzeTechnicalComponent(targetBase64: string, contextBase64?: string, modelId: string = DEFAULT_MODEL): Promise<TechData> {
@@ -498,6 +499,7 @@ export async function analyzeTechnicalComponent(targetBase64: string, contextBas
     2. Identify the **PARENT SYSTEM** from the CONTEXT (e.g. Steam Locomotive, Motherboard).
     3. Explain the **FUNCTION** of the component (physics/engineering purpose).
     4. Detect if this is a real machine or a **Scale Model / Toy**. If it is a model, analyze it as if it were the real thing, but set isScaleModel: true.
+    5. **CONFIDENCE SCORE:** Estimate your confidence (0-100) based on how clearly you can see the part and how distinctive it is.
     
     Return strict JSON format:
     {
@@ -507,7 +509,8 @@ export async function analyzeTechnicalComponent(targetBase64: string, contextBas
         "function": "string", // Concise engineering explanation (2 sentences)
         "material": "string", // Best guess (e.g. Steel, Plastic, Gold)
         "isScaleModel": boolean,
-        "complexity": "string" // "Low", "Medium", "High", "Extreme"
+        "complexity": "string", // "Low", "Medium", "High", "Extreme"
+        "confidence": number // 0-100
     }
     
     If it is NOT technical/mechanical, set "isTechnical": false.
@@ -540,7 +543,8 @@ export async function analyzeTechnicalComponent(targetBase64: string, contextBas
             parentSystem: "",
             function: "",
             isScaleModel: false,
-            complexity: "Low"
+            complexity: "Low",
+            confidence: 0
         };
     }
 }

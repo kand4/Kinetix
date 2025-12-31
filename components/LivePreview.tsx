@@ -352,6 +352,20 @@ const TechDataCard = ({ data, onClose }: { data: TechData, onClose: () => void }
                         </p>
                     </div>
 
+                    {/* NEW: Confidence / Accuracy Meter */}
+                    <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] uppercase text-cyan-600 font-mono">
+                            <span>System Confidence</span>
+                            <span>{data.confidence || 0}%</span>
+                        </div>
+                        <div className="h-1.5 bg-cyan-950 rounded-full overflow-hidden border border-cyan-900">
+                            <div 
+                                className="h-full bg-cyan-500 shadow-[0_0_10px_#06b6d4]" 
+                                style={{ width: `${data.confidence || 0}%` }}
+                            ></div>
+                        </div>
+                    </div>
+
                     {/* Specs Grid */}
                     <div className="grid grid-cols-2 gap-2 mt-2">
                         <div className="bg-cyan-900/10 border border-cyan-800/30 p-2 rounded">
@@ -803,7 +817,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
                 
                 if (bioResult.isBiological && bioResult.confidence > 50) {
                      setBioData(bioResult);
-                     setMessages(prev => [...prev, { role: 'ai', text: `Bio-Signature Detected: ${bioResult.commonName}. Accessing field guide...`, type: 'scan' }]);
+                     setMessages(prev => [...prev, { role: 'ai', text: `Bio-Signature Detected: ${bioResult.commonName}. Confidence: ${bioResult.confidence}%. Accessing field guide...`, type: 'scan' }]);
                      setIsChatLoading(false);
                      return;
                 }
@@ -814,7 +828,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
 
                 if (techResult.isTechnical) {
                     setTechData(techResult);
-                    setMessages(prev => [...prev, { role: 'ai', text: `Mechanical Structure Identified: ${techResult.componentName}. Loading schematics...`, type: 'scan' }]);
+                    setMessages(prev => [...prev, { role: 'ai', text: `Mechanical Structure Identified: ${techResult.componentName}. Confidence: ${techResult.confidence || 0}%. Loading schematics...`, type: 'scan' }]);
                     setIsChatLoading(false);
                     return;
                 }
@@ -861,7 +875,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ creation, isLoading, i
             
             if (bioResult.isBiological) {
                  setBioData(bioResult);
-                 setMessages(prev => [...prev, { role: 'ai', text: `Primary Subject Identified: ${bioResult.commonName}.`, type: 'scan' }]);
+                 setMessages(prev => [...prev, { role: 'ai', text: `Primary Subject Identified: ${bioResult.commonName}. Confidence: ${bioResult.confidence}%.`, type: 'scan' }]);
             } else {
                  setMessages(prev => [...prev, { role: 'ai', text: "Global scan complete. No specific biological entity identified as primary subject.", type: 'scan' }]);
             }
