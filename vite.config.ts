@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Ensure process.env is available for the Google GenAI SDK
-    'process.env': process.env
+    // Safely expose the API key to the client
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY)
   }
 })

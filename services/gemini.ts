@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import { GoogleGenAI, GenerateContentResponse, SchemaType } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
 // Default fallback if nothing passed
 const DEFAULT_MODEL = 'gemini-2.5-flash-latest';
