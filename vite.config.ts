@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -17,12 +16,10 @@ export default defineConfig({
   server: {
     host: true
   },
-  preview: {
-    host: true,
-    port: 4173
-  },
   define: {
-    // Safely expose the API key to the client
-    'process.env.API_KEY': JSON.stringify(process.env.API_KEY)
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY),
+    'process.env': {
+      API_KEY: JSON.stringify(process.env.API_KEY)
+    }
   }
 })
