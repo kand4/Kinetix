@@ -14,6 +14,13 @@ export default defineConfig({
       '@': path.resolve(__dirname, './'),
     },
   },
+  server: {
+    host: true
+  },
+  preview: {
+    host: true,
+    port: 4173
+  },
   define: {
     // Safely expose the API key to the client
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY)
